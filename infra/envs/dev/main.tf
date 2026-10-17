@@ -6,6 +6,7 @@ provider "google" {
 data "google_project" "this" {}
 
 resource "google_artifact_registry_repository" "images" {
+  #checkov:skip=CKV_GCP_84:Dev env uses Google-managed encryption; CMEK would be enforced in prod via org policy
   location      = var.region
   repository_id = "sentinelrag"
   format        = "DOCKER"
@@ -99,6 +100,7 @@ module "responder" {
 
 # ---------- Alert -> Pub/Sub -> responder ----------
 resource "google_pubsub_topic" "alerts" {
+  #checkov:skip=CKV_GCP_83:Topic carries alert metadata only, no sensitive data; Google-managed encryption is sufficient
   name = "slo-alerts"
 }
 
