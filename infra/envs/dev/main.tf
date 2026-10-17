@@ -7,7 +7,7 @@ data "google_project" "this" {}
 
 resource "google_artifact_registry_repository" "images" {
   #checkov:skip=CKV_GCP_84:Dev env uses Google-managed encryption; CMEK would be enforced in prod via org policy
-  location     = var.region
+  location      = var.region
   repository_id = "sentinelrag"
   format        = "DOCKER"
 }

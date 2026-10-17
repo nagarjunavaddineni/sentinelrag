@@ -13,8 +13,8 @@ from opentelemetry import trace
 from app import tools
 
 LLM_MODE = os.getenv("LLM_MODE", "real")  # "fake" = offline, no API calls (tests)
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-2.5-flash")
-FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-2.5-flash-lite")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3.8-flash")
+FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-3.5-flash-lite")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
 DOCS_DIR = os.getenv("DOCS_DIR", "docs")
 # USD per 1M tokens: check current Vertex AI pricing and update
