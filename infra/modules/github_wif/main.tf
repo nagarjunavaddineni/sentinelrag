@@ -8,7 +8,8 @@ resource "google_iam_workload_identity_pool" "github" {
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {
-  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  #checkov:skip=CKV_GCP_125:attribute_condition pins trust to a single repository (var.github_repo); Checkov cannot resolve the module variable
+  workload_identity_pool_id         = google_iam_workload_identity_pool.github.workload_identity_pool_id
   workload_identity_pool_provider_id = "github-provider"
   attribute_mapping = {
     "google.subject"       = "assertion.sub"
