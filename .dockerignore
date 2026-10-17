@@ -1,0 +1,7 @@
+.venv
+.git
+.env
+infra
+tests
+evals
+docs-assets

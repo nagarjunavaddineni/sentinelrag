@@ -1,0 +1,4 @@
+project_id  = "sentinelrag-12345"
+region      = "us-central1"
+github_repo = "nagarjunavaddineni/sentinelrag"
+alert_email = "you@example.com"

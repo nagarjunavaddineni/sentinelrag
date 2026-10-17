@@ -1,0 +1,95 @@
+name: ci-cd
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  REGION: ${{ vars.GCP_REGION }}
+  REPO: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/sentinelrag
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: terraform fmt -check -recursive infra
+      - run: terraform -chdir=infra/envs/dev init -backend=false
+      - run: terraform -chdir=infra/envs/dev validate
+      - run: pip install checkov
+      - run: checkov -d . --framework terraform dockerfile --quiet --compact
+
+  eval:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      LLM_MODE: real
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      APP_API_KEY: ci-test-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pip install -r requirements.txt
+      - name: Start API
+        run: |
+          nohup uvicorn app.main:app --port 8080 > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8080/healthz && break; sleep 2; done
+      - name: Quality gate (PromptFoo)
+        run: npx --yes promptfoo@latest eval -c evals/promptfooconfig.yaml -j 1 --delay 4000 --no-cache
+      - if: failure()
+        run: cat api.log
+
+  deploy:
+    needs: [test, iac, eval]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+      - name: Build and push images
+        run: |
+          docker build -t $REPO/api:$GITHUB_SHA .
+          docker build -t $REPO/responder:$GITHUB_SHA responder
+          docker push $REPO/api:$GITHUB_SHA
+          docker push $REPO/responder:$GITHUB_SHA
+      - name: Deploy
+        run: |
+          gcloud run deploy sentinelrag-api --image $REPO/api:$GITHUB_SHA --region $REGION --quiet
+          gcloud run services update-traffic sentinelrag-api --to-latest --region $REGION --quiet
+          gcloud run deploy sentinelrag-responder --image $REPO/responder:$GITHUB_SHA --region $REGION --quiet
+      - name: Smoke test
+        run: |
+          URL=$(gcloud run services describe sentinelrag-api --region $REGION --format='value(status.url)')
+          curl -sf "$URL/healthz"
