@@ -15,7 +15,7 @@ providers:
 defaultTest:
   assert:
     - type: latency
-      threshold: 20000
+      threshold: 30000 # allows one retry after a transient 503 from Gemini
 tests:
   - vars: { question: "What is the availability SLO for checkout-api?" }
     assert:
