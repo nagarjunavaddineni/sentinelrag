@@ -114,8 +114,13 @@ def _generate(prompt):
     for model in (CHAT_MODEL, FALLBACK_MODEL):
         for attempt in range(3):
             try:
+                t0 = time.perf_counter()
                 resp = client().models.generate_content(model=model, contents=prompt, config=config)
                 u = resp.usage_metadata
+                log(severity="INFO", message="llm_call", model=model, attempt=attempt + 1,
+                    generate_ms=round((time.perf_counter() - t0) * 1000),
+                    thoughts_tokens=getattr(u, "thoughts_token_count", None),
+                    afc_turns=len(getattr(resp, "automatic_function_calling_history", None) or []))
                 usage = ((u.prompt_token_count or 0), (u.candidates_token_count or 0)) if u else (0, 0)
                 return resp.text or "", model, usage
             except Exception as e:  # retry, then fall back to the cheaper model
@@ -130,6 +135,7 @@ def answer(index, question):
     start = time.perf_counter()
     with tracer.start_as_current_span("retrieve"):
         hits = index.search(question)
+    retrieve_ms = round((time.perf_counter() - start) * 1000)
     context = "\n\n".join(f"[{c.source}]\n{c.text}" for c, _ in hits)
     prompt = f"Context:\n{context}\n\nQuestion: {question}"
 
@@ -146,7 +152,7 @@ def answer(index, question):
     log(severity="INFO", message="llm_request", model=model,
         fallback_used=model == FALLBACK_MODEL, prompt_tokens=prompt_tokens,
         output_tokens=output_tokens, total_tokens=prompt_tokens + output_tokens,
-        est_cost_usd=round(cost, 8), latency_ms=latency_ms)
+        est_cost_usd=round(cost, 8), latency_ms=latency_ms, retrieve_ms=retrieve_ms)
 
     return {
         "answer": text,
