@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
+from app import rag
 from app.main import app
 from app.tools import error_budget_minutes
 
@@ -38,3 +41,16 @@ def test_chaos_injection(monkeypatch):
 
 def test_error_budget_tool():
     assert error_budget_minutes(99.9, 30) == 43.2
+
+
+def test_generate_limits_thinking(monkeypatch):
+    seen = {}
+
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            seen["config"] = config
+            return SimpleNamespace(text="ok", usage_metadata=None)
+
+    monkeypatch.setattr(rag, "client", lambda: SimpleNamespace(models=FakeModels()))
+    assert rag._generate("hi") == ("ok", rag.CHAT_MODEL, (0, 0))
+    assert seen["config"].thinking_config.thinking_level == "LOW"

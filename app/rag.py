@@ -16,6 +16,9 @@ LLM_MODE = os.getenv("LLM_MODE", "real")  # "fake" = offline, no API calls (test
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3.8-flash")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-3.5-flash-lite")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
+# Default model thinking pushed eval answers to 30-60s; short grounded lookups don't need it.
+# Set to "" to use the model's default.
+THINKING_LEVEL = os.getenv("THINKING_LEVEL", "low")
 DOCS_DIR = os.getenv("DOCS_DIR", "docs")
 # USD per 1M tokens: check current Vertex AI pricing and update
 PRICE_IN = float(os.getenv("PRICE_INPUT_PER_M", "0.30"))
@@ -104,7 +107,8 @@ class Index:
 def _generate(prompt):
     from google.genai import types
     config = types.GenerateContentConfig(
-        system_instruction=SYSTEM, temperature=0.2, tools=tools.ALL_TOOLS
+        system_instruction=SYSTEM, temperature=0.2, tools=tools.ALL_TOOLS,
+        thinking_config=types.ThinkingConfig(thinking_level=THINKING_LEVEL.upper()) if THINKING_LEVEL else None,
     )
     last_error = None
     for model in (CHAT_MODEL, FALLBACK_MODEL):
