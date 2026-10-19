@@ -16,6 +16,12 @@ LLM_MODE = os.getenv("LLM_MODE", "real")  # "fake" = offline, no API calls (test
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3.8-flash")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-3.5-flash-lite")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
+# Default model thinking pushed eval answers to 30-60s; short grounded lookups don't need it.
+# Set to "" to use the model's default.
+THINKING_LEVEL = os.getenv("THINKING_LEVEL", "low")
+# Under load Gemini can hang a single call for minutes; cut it off and fail over instead.
+LLM_TIMEOUT_MS = int(os.getenv("LLM_TIMEOUT_MS", "12000"))
+ATTEMPTS_PER_MODEL = int(os.getenv("LLM_ATTEMPTS_PER_MODEL", "2"))
 DOCS_DIR = os.getenv("DOCS_DIR", "docs")
 # USD per 1M tokens: check current Vertex AI pricing and update
 PRICE_IN = float(os.getenv("PRICE_INPUT_PER_M", "0.30"))
@@ -104,21 +110,29 @@ class Index:
 def _generate(prompt):
     from google.genai import types
     config = types.GenerateContentConfig(
-        system_instruction=SYSTEM, temperature=0.2, tools=tools.ALL_TOOLS
+        system_instruction=SYSTEM, temperature=0.2, tools=tools.ALL_TOOLS,
+        thinking_config=types.ThinkingConfig(thinking_level=THINKING_LEVEL.upper()) if THINKING_LEVEL else None,
+        http_options=types.HttpOptions(timeout=LLM_TIMEOUT_MS),
     )
     last_error = None
     for model in (CHAT_MODEL, FALLBACK_MODEL):
-        for attempt in range(3):
+        for attempt in range(ATTEMPTS_PER_MODEL):
             try:
+                t0 = time.perf_counter()
                 resp = client().models.generate_content(model=model, contents=prompt, config=config)
                 u = resp.usage_metadata
+                log(severity="INFO", message="llm_call", model=model, attempt=attempt + 1,
+                    generate_ms=round((time.perf_counter() - t0) * 1000),
+                    thoughts_tokens=getattr(u, "thoughts_token_count", None),
+                    afc_turns=len(getattr(resp, "automatic_function_calling_history", None) or []))
                 usage = ((u.prompt_token_count or 0), (u.candidates_token_count or 0)) if u else (0, 0)
                 return resp.text or "", model, usage
             except Exception as e:  # retry, then fall back to the cheaper model
                 last_error = e
                 log(severity="WARNING", message="llm_retry", model=model,
                     attempt=attempt + 1, error=str(e)[:200])
-                time.sleep(2 ** attempt)
+                if attempt + 1 < ATTEMPTS_PER_MODEL:
+                    time.sleep(1)
     raise last_error
 
 
@@ -126,6 +140,7 @@ def answer(index, question):
     start = time.perf_counter()
     with tracer.start_as_current_span("retrieve"):
         hits = index.search(question)
+    retrieve_ms = round((time.perf_counter() - start) * 1000)
     context = "\n\n".join(f"[{c.source}]\n{c.text}" for c, _ in hits)
     prompt = f"Context:\n{context}\n\nQuestion: {question}"
 
@@ -142,7 +157,7 @@ def answer(index, question):
     log(severity="INFO", message="llm_request", model=model,
         fallback_used=model == FALLBACK_MODEL, prompt_tokens=prompt_tokens,
         output_tokens=output_tokens, total_tokens=prompt_tokens + output_tokens,
-        est_cost_usd=round(cost, 8), latency_ms=latency_ms)
+        est_cost_usd=round(cost, 8), latency_ms=latency_ms, retrieve_ms=retrieve_ms)
 
     return {
         "answer": text,
